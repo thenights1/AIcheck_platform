@@ -23,7 +23,6 @@ if %errorlevel% neq 0 (
     echo [WARN] opencode CLI not found in PATH.
     echo   Agent will run in simulation mode without AI.
     echo   Install: pip install opencode
-    echo   Or: https://github.com/anomalyco/opencode
     echo.
 )
 
@@ -40,19 +39,15 @@ if not exist ".deps_installed" (
     )
 )
 
-REM --- Server URL ---
-set "SERVER_URL=http://localhost:8000"
-if not "%~1"=="" set "SERVER_URL=%~1"
-
 echo.
-echo   Server  : %SERVER_URL%
+echo   Config  : %~dp0agent.yaml
 echo   Skills  : %~dp0compliance_skills\
 echo   WorkDir : %~dp0
 echo.
-echo [INFO] Starting Agent, connecting to %SERVER_URL% ...
+echo [INFO] Starting Agent ...
 echo.
 
 set "PYTHONPATH=%~dp0;%PYTHONPATH%"
-python -m agent.main --server "%SERVER_URL%"
+python -m agent.main
 
 pause

@@ -105,11 +105,11 @@ export default function AgentPanel({ onBack }: Props) {
 
           <div>
             <h4 className="font-medium text-slate-200 mb-2">3. 启动 Agent</h4>
-            <p className="text-slate-400 mb-1">双击 <code className="rounded bg-slate-800 px-1 text-xs">run_agent.bat</code> 启动，或命令行执行：</p>
+            <p className="text-slate-400 mb-1">编辑好 <code className="rounded bg-slate-800 px-1 text-xs">agent.yaml</code> 后，双击 <code className="rounded bg-slate-800 px-1 text-xs">run_agent.bat</code> 即可启动：</p>
             <div className="rounded-lg bg-slate-950 px-3 py-2 font-mono text-xs text-slate-300">
-              run_agent.bat &lt;服务器地址&gt;
+              双击 run_agent.bat
             </div>
-            <p className="mt-1 text-xs text-slate-500">不带参数时默认连接 http://localhost:8000</p>
+            <p className="mt-1 text-xs text-slate-500">Agent 会自动从 agent.yaml 读取配置，无需额外参数</p>
           </div>
 
           <div className="rounded-lg border border-green-500/20 bg-green-500/10 px-3 py-2">
