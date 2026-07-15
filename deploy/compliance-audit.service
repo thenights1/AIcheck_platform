@@ -1,0 +1,15 @@
+[Unit]
+Description=ComplianceAudit Backend
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/compliance-audit
+ExecStart=/opt/compliance-audit/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+Environment=PATH=/opt/compliance-audit/.venv/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target
