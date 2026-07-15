@@ -21,7 +21,8 @@ class Reporter:
         self.agent_name = name
 
     async def send_progress(self, task_id: str, status: str, progress: float = 0,
-                            completed_skills: int = 0, error_message: str | None = None) -> None:
+                            completed_skills: int = 0, error_message: str | None = None,
+                            current_skill: str = "") -> None:
         try:
             resp = await self._client.post(
                 f"{self.server_url}/api/agent/task/{task_id}/progress",
@@ -30,6 +31,7 @@ class Reporter:
                     "progress": progress,
                     "completed_skills": completed_skills,
                     "error_message": error_message,
+                    "current_skill": current_skill,
                 },
             )
             resp.raise_for_status()

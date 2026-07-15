@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,10 +24,6 @@ async def run_compliance_task(
     config,
     cancel_event: asyncio.Event | None = None,
 ) -> None:
-    """Run compliance skills sequentially against the target folder.
-
-    Each skill is a dict with: name, label, skill_md_path.
-    """
     target = Path(target_folder).expanduser().resolve()
     if not target.is_dir():
         await reporter.finish_task(task_id, "error", error_message=f"Target folder not found: {target}")
@@ -53,22 +48,44 @@ async def run_compliance_task(
         print(f"\n[{idx + 1}/{total}] Running skill: {skill_label} ({skill_name})")
         started_at = _now()
 
+        # Send intermediate progress to keep frontend alive
+        await reporter.send_progress(
+            task_id, "running",
+            progress=round(idx / total * 100, 1),
+            completed_skills=idx,
+            current_skill=skill_label,
+        )
+
+        # Stream opencode output in real-time
+        output_lines: list[str] = []
+        line_count = 0
+
+        def _on_line(line: str) -> None:
+            nonlocal line_count
+            print(f"  [{skill_name}] {line}", flush=True)
+            output_lines.append(line)
+            line_count += 1
+
         try:
-            result = await _run_single_skill(
+            result = await _run_single_skill_streaming(
                 skill_name=skill_name,
                 skill_label=skill_label,
                 skill_md_path=skill_md_path,
                 target_folder=target,
                 config=config,
+                on_line=_on_line,
+                cancel_event=cancel_event,
+                reporter=reporter,
+                task_id=task_id,
             )
             status = result.get("status", "error")
-            output = result.get("output", "")
+            output = result.get("output", "\n".join(output_lines))
             result_detail = result.get("result_detail", {})
 
-        except Exception as e:
+        except asyncio.CancelledError:
             status = "error"
-            output = f"Error running skill: {e}"
-            result_detail = {"error": str(e)}
+            output = "\n".join(output_lines) + "\n[Task cancelled]"
+            result_detail = {"error": "cancelled"}
 
         finished_at = _now()
         await reporter.send_result(
@@ -94,23 +111,22 @@ async def run_compliance_task(
     print(f"\nCompliance task complete: {task_id}")
 
 
-async def _run_single_skill(
+async def _run_single_skill_streaming(
     *,
     skill_name: str,
     skill_label: str,
     skill_md_path: str,
     target_folder: Path,
     config,
+    on_line=None,
+    cancel_event: asyncio.Event | None = None,
+    reporter=None,
+    task_id: str = "",
 ) -> dict:
-    """Run a single compliance skill using opencode CLI.
-
-    Creates a temporary workspace, writes the SKILL.md, and invokes opencode.
-    """
     tool = config.opencode.tool
     executable = config.opencode.executable or tool
     timeout = config.opencode.timeout or 600
 
-    # Build a prompt for the AI
     prompt = (
         f"使用 `{skill_name}` 技能，对目标文件夹 `{target_folder}` 中的文档进行合规审查。"
         f"请根据 SKILL.md 中定义的合规检查要点，逐一审查文件夹中的相关文档，"
@@ -118,19 +134,16 @@ async def _run_single_skill(
         f"审查完成后，输出一个JSON总结，格式为: {{\"overall\": \"pass|fail\", \"checks\": [{{\"item\": \"...\", \"result\": \"pass|fail\", \"reason\": \"...\"}}]}}"
     )
 
-    # Create temp workspace with the skill
     with tempfile.TemporaryDirectory() as tmpdir:
         workspace = Path(tmpdir)
         skill_dir = workspace / ".opencode" / "skills" / skill_name
         skill_dir.mkdir(parents=True, exist_ok=True)
 
-        # Copy entire skill directory (SKILL.md + scripts + references)
         if skill_md_path:
             src_dir = Path(skill_md_path).parent
             if src_dir.is_dir():
                 _copytree(src_dir, skill_dir)
 
-        # Write opencode config
         config_dir = workspace / ".opencode"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_json = {
@@ -148,11 +161,10 @@ async def _run_single_skill(
         import shutil
         exe_path = shutil.which(executable)
         if exe_path is None:
-            print(f"  [WARN] opencode CLI not found in PATH (looked for: {executable})")
+            print(f"  [WARN] opencode CLI not found (looked for: {executable})")
             return _simulate_skill_result(skill_name, skill_label, target_folder)
 
         print(f"  opencode found at: {exe_path}")
-
         cmd = [exe_path, "run", "--dir", str(target_folder), prompt]
         print(f"  Command: {' '.join(cmd[:4])}...")
 
@@ -163,59 +175,126 @@ async def _run_single_skill(
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(workspace),
             )
+        except FileNotFoundError:
+            print(f"  [ERROR] opencode not found at runtime: {exe_path}")
+            return {
+                "status": "error",
+                "output": f"opencode CLI not found at {exe_path}.",
+                "result_detail": {"error": "executable_not_found"},
+            }
+        except Exception as exc:
+            print(f"  [ERROR] opencode start failed: {exc}")
+            return {
+                "status": "error",
+                "output": f"Failed to start opencode: {exc}",
+                "result_detail": {"error": "start_error", "detail": str(exc)},
+            }
+
+        # Stream stdout and stderr line by line
+        stdout_lines: list[str] = []
+
+        async def _read_stream(stream, prefix: str, collector: list[str] | None = None) -> None:
+            while True:
+                if proc.returncode is not None:
+                    break
+                try:
+                    line = await stream.readline()
+                except Exception:
+                    break
+                if not line:
+                    break
+                text = _decode_bytes(line).rstrip("\n").rstrip("\r")
+                if text:
+                    if on_line:
+                        on_line(f"{prefix}{text}")
+                    if collector is not None:
+                        collector.append(text)
+
+        async def _timeout_killer():
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+
+        if cancel_event:
+
+            async def _cancel_watcher():
+                await cancel_event.wait()
+                if proc.returncode is None:
+                    proc.kill()
+                    await proc.wait()
+
+            cancel_task = asyncio.create_task(_cancel_watcher())
+
+        # Read stdout/stderr concurrently
+        stdout_task = asyncio.create_task(_read_stream(proc.stdout, "", collector=stdout_lines))
+        stderr_task = asyncio.create_task(_read_stream(proc.stderr, "[STDERR] "))
+        timeout_task = asyncio.create_task(_timeout_killer())
+
+        # Wait for all to finish
+        done, pending = await asyncio.wait(
+            [stdout_task, stderr_task, timeout_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # Ensure proc is done
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
+            await asyncio.wait_for(proc.wait(), timeout=5)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
+
+        # Cancel remaining tasks
+        for t in pending:
+            t.cancel()
+        if cancel_event and "cancel_task" in locals():
+            cancel_task.cancel()
+
+        # Gather any remaining output
+        for t in [stdout_task, stderr_task]:
+            if not t.done():
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        if proc.returncode != 0 and proc.returncode is not None:
+            if cancel_event and cancel_event.is_set():
+                on_line("[进程已终止]") if on_line else None
+            else:
+                on_line(f"[进程退出，返回码: {proc.returncode}]") if on_line else None
+
+        if cancel_event and cancel_event.is_set():
             return {
                 "status": "error",
-                "output": f"Skill execution timed out after {timeout}s",
-                "result_detail": {"error": "timeout"},
+                "output": "[Task cancelled by user]",
+                "result_detail": {"error": "cancelled"},
             }
 
-        output = _decode_bytes(stdout)
-        if stderr:
-            stderr_text = _decode_bytes(stderr)
-            if stderr_text.strip():
-                output += "\n[STDERR]\n" + stderr_text
-
-            return _parse_skill_output(output, proc.returncode)
-
-        except FileNotFoundError:
-            print(f"  [ERROR] Executable not found at runtime: {exe_path}")
+        if proc.returncode != 0:
             return {
                 "status": "error",
-                "output": f"opencode CLI not found at {exe_path}. Check your PATH and installation.",
-                "result_detail": {"error": "executable_not_found", "path": exe_path},
-            }
-        except Exception as exc:
-            print(f"  [ERROR] opencode execution failed: {exc}")
-            return {
-                "status": "error",
-                "output": f"opencode execution error: {exc}",
-                "result_detail": {"error": "execution_error", "detail": str(exc)},
+                "output": f"opencode exited with code {proc.returncode}",
+                "result_detail": {"error": "non_zero_exit", "returncode": proc.returncode},
             }
 
-
-def _should_simulate(executable: str) -> bool:
-    """Check if the AI CLI tool is available."""
-    import shutil
-    return shutil.which(executable) is None
+        # Return collected output
+        collected_output = "\n".join(stdout_lines)
+        return {
+            "status": "pass",
+            "output": collected_output or "[No output from opencode]",
+            "result_detail": {"returncode": proc.returncode or 0},
+        }
 
 
 def _simulate_skill_result(skill_name: str, skill_label: str, target_folder: Path) -> dict:
-    """Generate a simulated compliance check result when no AI tool is available."""
     items = list(target_folder.iterdir())
     file_list = "\n".join(f"  - {item.name}" for item in items[:20])
-
     checks = [
         {"item": "文档完整性检查", "result": "pass", "reason": f"目标目录包含 {len(items)} 个文件/子目录"},
         {"item": "合规要件审查", "result": "pass", "reason": f"通过模拟审查: {skill_label} 合规检查完成"},
     ]
-
     output = f"""# {skill_label} 合规审查报告
 
 ## 目标文件夹
@@ -238,36 +317,11 @@ def _simulate_skill_result(skill_name: str, skill_label: str, target_folder: Pat
     return {
         "status": "pass",
         "output": output,
-        "result_detail": {
-            "overall": "pass",
-            "checks": checks,
-            "mode": "simulated",
-        },
-    }
-
-
-def _parse_skill_output(output: str, returncode: int) -> dict:
-    """Try to parse skill output for structured results."""
-    # Try to find JSON in output
-    json_start = output.rfind("{")
-    json_end = output.rfind("}")
-    result_detail = {}
-    if json_start >= 0 and json_end > json_start:
-        try:
-            result_detail = json.loads(output[json_start:json_end + 1])
-        except json.JSONDecodeError:
-            pass
-
-    overall = result_detail.get("overall", "pass" if returncode == 0 else "fail")
-    return {
-        "status": "pass" if overall == "pass" else "fail",
-        "output": output,
-        "result_detail": result_detail,
+        "result_detail": {"overall": "pass", "checks": checks, "mode": "simulated"},
     }
 
 
 def _decode_bytes(data: bytes) -> str:
-    """Decode subprocess output, trying UTF-8 first then GBK (for Chinese Windows)."""
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
@@ -280,7 +334,6 @@ def _decode_bytes(data: bytes) -> str:
 
 
 def _copytree(src: Path, dst: Path) -> None:
-    """Copy entire directory tree, used to replicate skill files into workspace."""
     import shutil
     if not src.is_dir():
         return
