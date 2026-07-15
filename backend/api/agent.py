@@ -205,8 +205,15 @@ def list_agents(authorization: str | None = Header(None)) -> list[dict]:
     user_id = user["user_id"] if user else ""
     result = []
     for a in _registered_agents.values():
-        if user_id and a.user_id and a.user_id != user_id:
-            continue
+        # If user is logged in, only show agents that are either:
+        # - bound to this user, OR
+        # - have no owner_token (legacy/admin)
+        if user_id:
+            if a.user_id and a.user_id != user_id:
+                continue
+            # Also hide legacy agents (no token) for non-admin users
+            if not a.user_id:
+                continue
         result.append({
             "agent_id": a.agent_id,
             "name": a.name,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getAgents } from "../api/client";
 import type { AgentInfo } from "../types";
 
@@ -6,11 +6,28 @@ interface Props {
   onBack: () => void;
 }
 
-const DOWNLOAD_URL = "/api/agent/download";
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem("compliance_token");
+  if (token) return { Authorization: `Bearer ${token}` };
+  return {};
+}
+
+async function downloadAgentBlob() {
+  const resp = await fetch("/api/agent/download", { headers: getAuthHeaders() });
+  if (!resp.ok) throw new Error("Download failed");
+  const blob = await resp.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "compliance-audit-agent.zip";
+  a.click();
+  window.URL.revokeObjectURL(url);
+}
 
 export default function AgentPanel({ onBack }: Props) {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
 
   const refresh = async () => {
     try {
@@ -22,6 +39,17 @@ export default function AgentPanel({ onBack }: Props) {
       setLoading(false);
     }
   };
+
+  const handleDownload = useCallback(async () => {
+    setDownloading(true);
+    try {
+      await downloadAgentBlob();
+    } catch {
+      // ignore
+    } finally {
+      setDownloading(false);
+    }
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -53,16 +81,17 @@ export default function AgentPanel({ onBack }: Props) {
           <div>
             <h4 className="font-medium text-slate-200 mb-2">1. 下载 Agent 包</h4>
             <p className="text-slate-400 mb-2">点击下方按钮下载 Agent 包（含运行代码、合规技能、配置文件）：</p>
-            <a
-              href={DOWNLOAD_URL}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-colors"
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              下载 Agent 包 (ZIP)
-            </a>
+              {downloading ? "下载中..." : "下载 Agent 包 (ZIP)"}
+            </button>
             <p className="mt-2 text-xs text-slate-500">包含内容：agent/ 运行代码、compliance_skills/ 合规技能、agent.yaml 配置、run_agent.bat 启动脚本</p>
           </div>
 
