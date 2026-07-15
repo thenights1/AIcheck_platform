@@ -1,0 +1,5 @@
+name: data_privacy_compliance
+label: 数据隐私合规审查
+description: 检查目标文件夹中的文档是否符合数据隐私保护相关合规要求（如个人信息保护、数据分类分级等）
+enabled: true
+mode: opencode

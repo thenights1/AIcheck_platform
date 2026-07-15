@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+data/
+*.db
+*.db-wal
+*.db-shm
+.codegraph/
+logs/
+dist/
+.env

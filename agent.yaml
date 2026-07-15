@@ -1,0 +1,24 @@
+# ComplianceAudit Agent Configuration
+# 修改 server_url 为后端服务器地址
+server_url: "http://localhost:8000"
+agent_name: ""
+
+no_proxy: ""
+
+# opencode CLI 配置（用户需本地安装 opencode）
+opencode:
+  tool: "opencode"
+  executable: "opencode"
+  model: ""
+  timeout: 600
+  max_retries: 1
+
+llm_api:
+  enabled: false
+  base_url: ""
+  api_key: ""
+  model: ""
+  timeout: 300
+  max_retries: 3
+  temperature: 0.1
+  stream: false

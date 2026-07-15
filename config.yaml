@@ -1,0 +1,29 @@
+# ComplianceAudit Server Configuration
+server:
+  port: 8000
+  host: "0.0.0.0"
+
+storage:
+  tasks_dir: "data/tasks"
+
+auth:
+  default_admin_username: "admin"
+  default_admin_password: "admin123"
+  secret_key: "compliance-audit-secret-key-change-in-production"
+  token_expire_hours: 24
+
+opencode:
+  tool: "opencode"
+  executable: "opencode"
+  model: ""
+  timeout: 600
+
+llm_api:
+  enabled: false
+  base_url: ""
+  api_key: ""
+  model: ""
+  timeout: 300
+  max_retries: 3
+  temperature: 0.1
+  stream: false

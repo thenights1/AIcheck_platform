@@ -1,0 +1,5 @@
+name: test_demo
+label: 测试示例技能
+description: 用于测试合规审查流程。查看此模板了解如何创建新的合规技能。
+enabled: true
+mode: opencode
