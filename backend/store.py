@@ -1,4 +1,4 @@
-"""Simple in-memory + JSON file store for compliance tasks."""
+"""Simple in-memory + JSON file store for compliance tasks and users."""
 
 from __future__ import annotations
 
@@ -7,6 +7,67 @@ from pathlib import Path
 from threading import Lock
 
 from backend.models import ComplianceTask, SkillResult, TaskStatus
+
+
+class UserStore:
+    def __init__(self, data_dir: str = "data") -> None:
+        self._path = Path(data_dir) / "users.json"
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = Lock()
+        self._users: dict[str, dict] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if self._path.is_file():
+            try:
+                data = json.loads(self._path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._users = data
+            except Exception:
+                pass
+
+    def _save(self) -> None:
+        self._path.write_text(json.dumps(self._users, indent=2), encoding="utf-8")
+
+    def create_user(self, user_id: str, username: str, password: str, role: str = "user") -> dict:
+        with self._lock:
+            for u in self._users.values():
+                if u["username"] == username:
+                    raise ValueError("Username already exists")
+            import uuid
+            agent_token = uuid.uuid4().hex
+            user = {
+                "user_id": user_id,
+                "username": username,
+                "password": password,
+                "role": role,
+                "agent_token": agent_token,
+            }
+            self._users[user_id] = user
+            self._save()
+            return dict(user)
+
+    def get_user(self, user_id: str) -> dict | None:
+        with self._lock:
+            return dict(self._users.get(user_id, {})) or None
+
+    def get_user_by_username(self, username: str) -> dict | None:
+        with self._lock:
+            for u in self._users.values():
+                if u["username"] == username:
+                    return dict(u)
+            return None
+
+    def get_user_by_agent_token(self, token: str) -> dict | None:
+        with self._lock:
+            for u in self._users.values():
+                if u.get("agent_token") == token:
+                    return dict(u)
+            return None
+
+    def count_users(self) -> int:
+        with self._lock:
+            return len(self._users)
 
 
 class TaskStore:
@@ -55,13 +116,16 @@ class TaskStore:
         with self._lock:
             return self._cache.get(task_id)
 
-    def list_tasks(self) -> list[ComplianceTask]:
+    def list_tasks(self, user_id: str = "") -> list[ComplianceTask]:
         with self._lock:
-            return sorted(
+            tasks = sorted(
                 self._cache.values(),
                 key=lambda t: t.created_at,
                 reverse=True,
             )
+            if user_id:
+                tasks = [t for t in tasks if t.user_id == user_id]
+            return tasks
 
     def delete_task(self, task_id: str) -> bool:
         with self._lock:
@@ -116,13 +180,23 @@ class TaskStore:
             return task
 
 
-_store: TaskStore | None = None
+_user_store: UserStore | None = None
+_task_store: TaskStore | None = None
+
+
+def get_user_store() -> UserStore:
+    global _user_store
+    if _user_store is None:
+        from backend.config import get_config
+        cfg = get_config()
+        _user_store = UserStore(data_dir=str(Path(cfg.storage.tasks_dir).parent))
+    return _user_store
 
 
 def get_task_store() -> TaskStore:
-    global _store
-    if _store is None:
+    global _task_store
+    if _task_store is None:
         from backend.config import get_config
         cfg = get_config()
-        _store = TaskStore(data_dir=cfg.storage.tasks_dir)
-    return _store
+        _task_store = TaskStore(data_dir=cfg.storage.tasks_dir)
+    return _task_store

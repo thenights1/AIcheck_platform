@@ -99,3 +99,4 @@ class AgentInfo(BaseModel):
     last_seen: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     online: bool = True
     user_id: str = ""
+    owner_token: str = ""

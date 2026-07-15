@@ -62,6 +62,7 @@ async def _ws_loop(config, task_manager, reporter) -> None:
                     "type": "hello",
                     "name": name,
                     "config": remote_config_dict(config),
+                    "owner_token": config.owner_token,
                 }
                 await ws.send(json.dumps(hello_msg))
 

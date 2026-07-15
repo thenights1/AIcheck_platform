@@ -2,6 +2,7 @@
 # 修改 server_url 为后端服务器地址
 server_url: "http://localhost:8000"
 agent_name: ""
+owner_token: ""
 
 no_proxy: ""
 

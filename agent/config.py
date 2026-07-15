@@ -34,6 +34,7 @@ class LLMApiConfig:
 class AgentConfig:
     server_url: str = "http://localhost:8000"
     agent_name: str = ""
+    owner_token: str = ""
     no_proxy: str = ""
     opencode: OpenCodeConfig = field(default_factory=OpenCodeConfig)
     llm_api: LLMApiConfig = field(default_factory=LLMApiConfig)
@@ -59,6 +60,8 @@ def load_config(path: Path | None = None) -> AgentConfig:
         cfg.server_url = raw["server_url"]
     if "agent_name" in raw:
         cfg.agent_name = raw["agent_name"]
+    if "owner_token" in raw:
+        cfg.owner_token = str(raw.get("owner_token", ""))
     if "no_proxy" in raw:
         cfg.no_proxy = raw.get("no_proxy", "")
     if "opencode" in raw:

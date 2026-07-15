@@ -62,10 +62,11 @@ def create_task(req: TaskCreateRequest, authorization: str | None = Header(None)
     if req.agent_id:
         from backend.api.agent import _registered_agents
         ag = _registered_agents.get(req.agent_id)
-        if ag and ag.online:
-            agent_name = ag.name
-        else:
+        if not ag or not ag.online:
             raise HTTPException(status_code=400, detail="Selected agent is offline or not found")
+        if ag.user_id and ag.user_id != user_info.get("user_id", ""):
+            raise HTTPException(status_code=403, detail="Agent does not belong to your account")
+        agent_name = ag.name
 
     task_id = uuid.uuid4().hex
     task = ComplianceTask(
@@ -124,9 +125,9 @@ def create_task(req: TaskCreateRequest, authorization: str | None = Header(None)
 
 @router.get("")
 def list_tasks(authorization: str | None = Header(None)) -> list[dict]:
-    _get_user(authorization) if authorization else None
+    user = _get_user(authorization) if authorization else {"user_id": ""}
     store = get_task_store()
-    tasks = store.list_tasks()
+    tasks = store.list_tasks(user_id=user.get("user_id", ""))
     summaries = []
     for t in tasks:
         results = store.get_results(t.task_id)

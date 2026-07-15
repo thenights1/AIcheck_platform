@@ -26,6 +26,7 @@ export function getStoredUser() {
 export function logout() {
   localStorage.removeItem("compliance_token");
   localStorage.removeItem("compliance_user");
+  localStorage.removeItem("compliance_agent_token");
 }
 
 export async function login(username: string, password: string) {
@@ -41,6 +42,28 @@ export async function login(username: string, password: string) {
   const data = await resp.json();
   localStorage.setItem("compliance_token", data.token);
   localStorage.setItem("compliance_user", JSON.stringify(data.user));
+  if (data.agent_token) {
+    localStorage.setItem("compliance_agent_token", data.agent_token);
+  }
+  return data.user;
+}
+
+export async function register(username: string, password: string) {
+  const resp = await fetch(`${BASE}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json();
+    throw new Error(err.detail || "Registration failed");
+  }
+  const data = await resp.json();
+  localStorage.setItem("compliance_token", data.token);
+  localStorage.setItem("compliance_user", JSON.stringify(data.user));
+  if (data.agent_token) {
+    localStorage.setItem("compliance_agent_token", data.agent_token);
+  }
   return data.user;
 }
 

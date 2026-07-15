@@ -1,4 +1,4 @@
-"""Authentication API — simplified for demo."""
+"""Authentication API — login and registration."""
 
 from __future__ import annotations
 
@@ -10,24 +10,18 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.config import get_config
+from backend.store import get_user_store
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-_users: dict[str, dict] = {}
-_tokens: dict[str, str] = {}
 
-
-def _ensure_default_user() -> None:
-    if _users:
+def _ensure_default_admin() -> None:
+    store = get_user_store()
+    if store.count_users() > 0:
         return
     cfg = get_config().auth
     uid = uuid.uuid4().hex
-    _users[uid] = {
-        "user_id": uid,
-        "username": cfg.default_admin_username,
-        "password": cfg.default_admin_password,
-        "role": "admin",
-    }
+    store.create_user(uid, cfg.default_admin_username, cfg.default_admin_password, "admin")
 
 
 class LoginRequest(BaseModel):
@@ -35,29 +29,70 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class LoginResponse(BaseModel):
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthResponse(BaseModel):
     token: str
     user: dict
+    agent_token: str = ""
 
 
 @router.post("/login")
-def login(req: LoginRequest) -> LoginResponse:
-    _ensure_default_user()
-    for u in _users.values():
-        if u["username"] == req.username and u["password"] == req.password:
-            cfg = get_config().auth
-            token = jwt.encode(
-                {
-                    "user_id": u["user_id"],
-                    "username": u["username"],
-                    "exp": datetime.now(timezone.utc) + timedelta(hours=cfg.token_expire_hours),
-                },
-                cfg.secret_key,
-                algorithm="HS256",
-            )
-            _tokens[token] = u["user_id"]
-            return LoginResponse(token=token, user={"user_id": u["user_id"], "username": u["username"], "role": u["role"]})
-    raise HTTPException(status_code=401, detail="Invalid credentials")
+def login(req: LoginRequest) -> AuthResponse:
+    _ensure_default_admin()
+    store = get_user_store()
+    user = store.get_user_by_username(req.username)
+    if user is None or user["password"] != req.password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    cfg = get_config().auth
+    token = jwt.encode(
+        {
+            "user_id": user["user_id"],
+            "username": user["username"],
+            "exp": datetime.now(timezone.utc) + timedelta(hours=cfg.token_expire_hours),
+        },
+        cfg.secret_key,
+        algorithm="HS256",
+    )
+    return AuthResponse(
+        token=token,
+        user={"user_id": user["user_id"], "username": user["username"], "role": user["role"]},
+        agent_token=user.get("agent_token", ""),
+    )
+
+
+@router.post("/register")
+def register(req: RegisterRequest) -> AuthResponse:
+    if len(req.username) < 2:
+        raise HTTPException(status_code=400, detail="Username must be at least 2 characters")
+    if len(req.password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+
+    store = get_user_store()
+    try:
+        user = store.create_user(uuid.uuid4().hex, req.username, req.password, "user")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    cfg = get_config().auth
+    token = jwt.encode(
+        {
+            "user_id": user["user_id"],
+            "username": user["username"],
+            "exp": datetime.now(timezone.utc) + timedelta(hours=cfg.token_expire_hours),
+        },
+        cfg.secret_key,
+        algorithm="HS256",
+    )
+    return AuthResponse(
+        token=token,
+        user={"user_id": user["user_id"], "username": user["username"], "role": user["role"]},
+        agent_token=user.get("agent_token", ""),
+    )
 
 
 def verify_token(token: str) -> dict | None:
