@@ -18,6 +18,10 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio as _asyncio
+    from backend.api.agent import _set_main_loop
+    _set_main_loop(_asyncio.get_running_loop())
+
     config = get_config()
     Path(config.storage.tasks_dir).mkdir(parents=True, exist_ok=True)
     get_task_store()

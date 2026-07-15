@@ -91,11 +91,9 @@ def create_task(req: TaskCreateRequest, authorization: str | None = Header(None)
     ]
     store.save_results(task_id, results)
 
-    # Dispatch task to agent (fire-and-forget in background thread)
+    # Dispatch task to agent on main event loop
     if req.agent_id:
-        import asyncio
-        import threading
-        from backend.api.agent import send_agent_command
+        from backend.api.agent import dispatch_to_agent
 
         skills_meta = []
         for name in req.skills:
@@ -115,10 +113,7 @@ def create_task(req: TaskCreateRequest, authorization: str | None = Header(None)
             "skills_meta": skills_meta,
         }
 
-        def _dispatch():
-            asyncio.run(send_agent_command(req.agent_id, command))
-
-        threading.Thread(target=_dispatch, daemon=True).start()
+        dispatch_to_agent(req.agent_id, command)
 
     return {"task_id": task_id, **task.model_dump()}
 

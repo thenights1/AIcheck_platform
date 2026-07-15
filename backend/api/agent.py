@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Header, Request, WebSocket, WebSocketDisconnect
 
 from backend.logger import get_logger
-from backend.models import AgentInfo, AgentRemoteConfig, TaskStatus
+from backend.models import AgentInfo, TaskStatus
 from backend.store import get_task_store, get_user_store
 
 logger = get_logger(__name__)
@@ -20,107 +20,17 @@ router = APIRouter(tags=["agent"])
 public_router = APIRouter(tags=["agent_public"])
 
 _registered_agents: dict[str, AgentInfo] = {}
+_agent_ws: dict[str, WebSocket] = {}
+_main_loop: asyncio.AbstractEventLoop | None = None
 
 
-def _send_json(ws: WebSocket, data: dict):
-    return asyncio.create_task(ws.send_text(json.dumps(data, ensure_ascii=False)))
+def _set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    global _main_loop
+    _main_loop = loop
 
 
 @router.websocket("/api/agent/ws")
 async def agent_websocket(websocket: WebSocket) -> None:
-    await websocket.accept()
-    agent_id = None
-    try:
-        msg = await websocket.receive_json()
-        if msg.get("type") != "hello":
-            await websocket.close(code=4000)
-            return
-
-        name = msg.get("name") or socket.gethostname()
-        owner_token = msg.get("owner_token", "")
-        agent_id = uuid.uuid4().hex
-        ip = websocket.client.host if websocket.client else "unknown"
-
-        # Bind to user via owner_token
-        user_id = ""
-        if owner_token:
-            store = get_user_store()
-            owner = store.get_user_by_agent_token(owner_token)
-            if owner:
-                user_id = owner["user_id"]
-                logger.info("Agent bound to user %s via token", owner["username"])
-
-        agent_info = AgentInfo(
-            agent_id=agent_id,
-            name=name,
-            ip=ip,
-            last_seen=datetime.now(timezone.utc).isoformat(),
-            user_id=user_id,
-        )
-        _registered_agents[agent_id] = agent_info
-
-        await _send_json(websocket, {
-            "type": "welcome",
-            "agent_id": agent_id,
-            "config": {},
-        })
-
-        logger.info("Agent connected: %s (%s) user=%s", agent_id, name, user_id or "(unbound)")
-
-        while True:
-            incoming = await websocket.receive_json()
-            _touch_agent(agent_id)
-            if isinstance(incoming, dict) and incoming.get("type") == "heartbeat":
-                await _send_json(websocket, {"type": "heartbeat_ack"})
-                continue
-
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        logger.warning("Agent WS error for %s: %s", agent_id, e)
-    finally:
-        if agent_id:
-            ag = _registered_agents.pop(agent_id, None)
-            if ag:
-                logger.info("Agent disconnected: %s (%s)", agent_id, ag.name)
-
-
-def _touch_agent(agent_id: str) -> None:
-    ag = _registered_agents.get(agent_id)
-    if ag:
-        ag.last_seen = datetime.now(timezone.utc).isoformat()
-        ag.online = True
-
-
-async def send_agent_command(agent_id: str, command: dict) -> bool:
-    ws = _agent_ws.get(agent_id) if hasattr(sys.modules[__name__], '_agent_ws') else None
-    # Need WS reference — keep a global
-    return False  # will fix below
-
-
-# Store WebSocket connections
-_agent_ws: dict[str, WebSocket] = {}
-
-
-# Patch the websocket handler to store ws reference
-# Actually re-declare _agent_ws before the handler... it's already defined above as empty dict.
-# Let me just add the WS storage to the handler.
-
-# Re-define the handler properly
-_original_handler = agent_websocket
-
-# Actually simpler: just store ws in the handler function
-# Let me rewrite this properly
-
-# Remove the old handler and recreate
-del _agent_ws
-
-
-_agent_ws: dict[str, WebSocket] = {}
-
-
-@router.websocket("/api/agent/ws")
-async def _agent_websocket_v2(websocket: WebSocket) -> None:
     global _agent_ws
     await websocket.accept()
     agent_id = None
@@ -153,11 +63,11 @@ async def _agent_websocket_v2(websocket: WebSocket) -> None:
         _registered_agents[agent_id] = agent_info
         _agent_ws[agent_id] = websocket
 
-        await _send_json(websocket, {
+        await websocket.send_text(json.dumps({
             "type": "welcome",
             "agent_id": agent_id,
             "config": {},
-        })
+        }))
 
         logger.info("Agent connected: %s (%s) user=%s", agent_id, name, user_id or "(unbound)")
 
@@ -165,7 +75,7 @@ async def _agent_websocket_v2(websocket: WebSocket) -> None:
             incoming = await websocket.receive_json()
             _touch_agent(agent_id)
             if isinstance(incoming, dict) and incoming.get("type") == "heartbeat":
-                await _send_json(websocket, {"type": "heartbeat_ack"})
+                await websocket.send_text(json.dumps({"type": "heartbeat_ack"}))
                 continue
 
     except WebSocketDisconnect:
@@ -180,6 +90,13 @@ async def _agent_websocket_v2(websocket: WebSocket) -> None:
                 logger.info("Agent disconnected: %s (%s)", agent_id, ag.name)
 
 
+def _touch_agent(agent_id: str) -> None:
+    ag = _registered_agents.get(agent_id)
+    if ag:
+        ag.last_seen = datetime.now(timezone.utc).isoformat()
+        ag.online = True
+
+
 async def send_agent_command(agent_id: str, command: dict) -> bool:
     ws = _agent_ws.get(agent_id)
     if ws is None:
@@ -189,6 +106,21 @@ async def send_agent_command(agent_id: str, command: dict) -> bool:
         return True
     except Exception:
         return False
+
+
+def dispatch_to_agent(agent_id: str, command: dict) -> None:
+    """Thread-safe dispatch: schedule send_agent_command on the main event loop."""
+    loop = _main_loop
+    if loop is None:
+        logger.error("Main event loop not set, cannot dispatch to agent %s", agent_id)
+        return
+    asyncio.run_coroutine_threadsafe(_dispatch_and_log(agent_id, command), loop)
+
+
+async def _dispatch_and_log(agent_id: str, command: dict) -> None:
+    ok = await send_agent_command(agent_id, command)
+    if not ok:
+        logger.warning("Failed to send command to agent %s", agent_id)
 
 
 def _parse_auth(authorization: str | None) -> dict | None:
@@ -205,13 +137,9 @@ def list_agents(authorization: str | None = Header(None)) -> list[dict]:
     user_id = user["user_id"] if user else ""
     result = []
     for a in _registered_agents.values():
-        # If user is logged in, only show agents that are either:
-        # - bound to this user, OR
-        # - have no owner_token (legacy/admin)
         if user_id:
             if a.user_id and a.user_id != user_id:
                 continue
-            # Also hide legacy agents (no token) for non-admin users
             if not a.user_id:
                 continue
         result.append({
