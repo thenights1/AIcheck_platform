@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { getTaskDetail } from "../api/client";
 import type { TaskDetail as TaskDetailType } from "../types";
 
@@ -172,9 +173,9 @@ export default function TaskDetail({ taskId, onBack }: Props) {
                       </div>
                     )}
                     {result.output ? (
-                      <pre className="whitespace-pre-wrap text-xs text-slate-300 font-mono bg-slate-950 rounded-lg p-3 max-h-96 overflow-auto">
-                        {result.output}
-                      </pre>
+                      <div className="prose prose-invert prose-sm max-w-none bg-slate-950 rounded-lg p-4 max-h-96 overflow-auto">
+                        <ReactMarkdown>{result.output}</ReactMarkdown>
+                      </div>
                     ) : (
                       <p className="text-xs text-slate-500">等待输出...</p>
                     )}

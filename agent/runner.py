@@ -147,14 +147,16 @@ async def _run_single_skill(
         print(f"  Workspace: {workspace}")
         print(f"  Target: {target_folder}")
 
-        # Build the opencode command
-        # For demo/without real AI, we simulate the result
-        cmd = [executable, "run", prompt]
-        env = None
-
-        # If there's no real AI tool, simulate
-        if _should_simulate(executable):
+        import shutil
+        exe_path = shutil.which(executable)
+        if exe_path is None:
+            print(f"  [WARN] opencode CLI not found in PATH (looked for: {executable})")
             return _simulate_skill_result(skill_name, skill_label, target_folder)
+
+        print(f"  opencode found at: {exe_path}")
+
+        cmd = [exe_path, "run", "--dir", str(target_folder), prompt]
+        print(f"  Command: {' '.join(cmd[:4])}...")
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -178,13 +180,26 @@ async def _run_single_skill(
 
             output = stdout.decode("utf-8", errors="replace")
             if stderr:
-                output += "\n[STDERR]\n" + stderr.decode("utf-8", errors="replace")
+                stderr_text = stderr.decode("utf-8", errors="replace")
+                if stderr_text.strip():
+                    output += "\n[STDERR]\n" + stderr_text
 
             return _parse_skill_output(output, proc.returncode)
 
         except FileNotFoundError:
-            # Tool not found — simulate
-            return _simulate_skill_result(skill_name, skill_label, target_folder)
+            print(f"  [ERROR] Executable not found at runtime: {exe_path}")
+            return {
+                "status": "error",
+                "output": f"opencode CLI not found at {exe_path}. Check your PATH and installation.",
+                "result_detail": {"error": "executable_not_found", "path": exe_path},
+            }
+        except Exception as exc:
+            print(f"  [ERROR] opencode execution failed: {exc}")
+            return {
+                "status": "error",
+                "output": f"opencode execution error: {exc}",
+                "result_detail": {"error": "execution_error", "detail": str(exc)},
+            }
 
 
 def _should_simulate(executable: str) -> bool:

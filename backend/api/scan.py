@@ -90,10 +90,12 @@ def create_task(req: TaskCreateRequest, authorization: str | None = Header(None)
     ]
     store.save_results(task_id, results)
 
-    # Dispatch task to agent — send skill metadata (no paths, agent resolves locally)
+    # Dispatch task to agent (fire-and-forget in background thread)
     if req.agent_id:
         import asyncio
+        import threading
         from backend.api.agent import send_agent_command
+
         skills_meta = []
         for name in req.skills:
             entry = registry.get(name)
@@ -102,14 +104,20 @@ def create_task(req: TaskCreateRequest, authorization: str | None = Header(None)
                 "label": entry.label,
                 "description": entry.description,
             })
-        asyncio.ensure_future(send_agent_command(req.agent_id, {
+
+        command = {
             "type": "task",
             "task_id": task_id,
             "task_name": req.task_name,
             "target_folder": req.target_folder,
             "skills": req.skills,
             "skills_meta": skills_meta,
-        }))
+        }
+
+        def _dispatch():
+            asyncio.run(send_agent_command(req.agent_id, command))
+
+        threading.Thread(target=_dispatch, daemon=True).start()
 
     return {"task_id": task_id, **task.model_dump()}
 
