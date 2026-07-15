@@ -163,24 +163,24 @@ async def _run_single_skill(
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(workspace),
             )
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return {
-                    "status": "error",
-                    "output": f"Skill execution timed out after {timeout}s",
-                    "result_detail": {"error": "timeout"},
-                }
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {
+                "status": "error",
+                "output": f"Skill execution timed out after {timeout}s",
+                "result_detail": {"error": "timeout"},
+            }
 
-            output = stdout.decode("utf-8", errors="replace")
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output += "\n[STDERR]\n" + stderr_text
+        output = _decode_bytes(stdout)
+        if stderr:
+            stderr_text = _decode_bytes(stderr)
+            if stderr_text.strip():
+                output += "\n[STDERR]\n" + stderr_text
 
             return _parse_skill_output(output, proc.returncode)
 
@@ -264,6 +264,19 @@ def _parse_skill_output(output: str, returncode: int) -> dict:
         "output": output,
         "result_detail": result_detail,
     }
+
+
+def _decode_bytes(data: bytes) -> str:
+    """Decode subprocess output, trying UTF-8 first then GBK (for Chinese Windows)."""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return data.decode("gbk")
+    except UnicodeDecodeError:
+        pass
+    return data.decode("utf-8", errors="replace")
 
 
 def _copytree(src: Path, dst: Path) -> None:
