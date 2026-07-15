@@ -50,6 +50,7 @@ def download_agent_package(authorization: str | None = Header(None)):
     agent_yaml = repo_root / "agent.yaml"
     requirements = repo_root / "requirements.txt"
     run_bat = repo_root / "run_agent.bat"
+    run_sh = repo_root / "run_agent.sh"
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -73,6 +74,8 @@ def download_agent_package(authorization: str | None = Header(None)):
 
         if run_bat.is_file():
             zf.write(run_bat, "run_agent.bat")
+        if run_sh.is_file():
+            zf.write(run_sh, "run_agent.sh")
 
         # Inject agent_token into agent.yaml
         if agent_yaml.is_file():

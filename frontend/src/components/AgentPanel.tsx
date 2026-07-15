@@ -92,7 +92,7 @@ export default function AgentPanel({ onBack }: Props) {
               </svg>
               {downloading ? "下载中..." : "下载 Agent 包 (ZIP)"}
             </button>
-            <p className="mt-2 text-xs text-slate-500">包含内容：agent/ 运行代码、compliance_skills/ 合规技能、agent.yaml 配置、run_agent.bat 启动脚本</p>
+            <p className="mt-2 text-xs text-slate-500">包含内容：agent/ 运行代码、compliance_skills/ 合规技能、agent.yaml 配置、run_agent.bat / run_agent.sh 启动脚本</p>
           </div>
 
           <div>
@@ -105,11 +105,18 @@ export default function AgentPanel({ onBack }: Props) {
 
           <div>
             <h4 className="font-medium text-slate-200 mb-2">3. 启动 Agent</h4>
-            <p className="text-slate-400 mb-1">编辑好 <code className="rounded bg-slate-800 px-1 text-xs">agent.yaml</code> 后，双击 <code className="rounded bg-slate-800 px-1 text-xs">run_agent.bat</code> 即可启动：</p>
-            <div className="rounded-lg bg-slate-950 px-3 py-2 font-mono text-xs text-slate-300">
-              双击 run_agent.bat
+            <p className="text-slate-400 mb-2">编辑好 <code className="rounded bg-slate-800 px-1 text-xs">agent.yaml</code> 后，根据操作系统选择启动方式：</p>
+            <div className="space-y-2">
+              <div className="rounded-lg bg-slate-950 px-3 py-2">
+                <div className="text-xs text-slate-400 mb-1">Windows</div>
+                <code className="text-xs text-slate-300">双击 run_agent.bat</code>
+              </div>
+              <div className="rounded-lg bg-slate-950 px-3 py-2">
+                <div className="text-xs text-slate-400 mb-1">Linux / macOS</div>
+                <code className="text-xs text-slate-300">chmod +x run_agent.sh && ./run_agent.sh</code>
+              </div>
             </div>
-            <p className="mt-1 text-xs text-slate-500">Agent 会自动从 agent.yaml 读取配置，无需额外参数</p>
+            <p className="mt-2 text-xs text-slate-500">Agent 会自动从 agent.yaml 读取配置，无需额外参数</p>
           </div>
 
           <div className="rounded-lg border border-green-500/20 bg-green-500/10 px-3 py-2">
