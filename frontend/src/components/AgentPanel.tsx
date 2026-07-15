@@ -99,7 +99,7 @@ export default function AgentPanel({ onBack }: Props) {
             <h4 className="font-medium text-slate-200 mb-2">2. 解压并配置服务器地址</h4>
             <p className="text-slate-400 mb-1">解压下载的 ZIP 到任意目录，编辑 <code className="rounded bg-slate-800 px-1 text-xs">agent.yaml</code>：</p>
             <div className="rounded-lg bg-slate-950 px-3 py-2 font-mono text-xs text-slate-300">
-              server_url: "http://&lt;本系统地址&gt;:8000"
+              server_url: "http://&lt;服务器域名或IP&gt;"
             </div>
           </div>
 

@@ -19,47 +19,72 @@ Browser ──HTTP──► Backend (FastAPI, :8000) ◄──WebSocket── Ag
 
 ## 快速开始
 
-### 安装依赖
+### 本地开发
 
 ```bash
+# 安装依赖
 pip install -r requirements.txt
-```
 
-### 启动后端
-
-```bash
+# 启动后端（开发模式，热重载）
 python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
-```
 
-或双击 `start.bat`
-
-### 启动前端（开发模式）
-
-```bash
+# 启动前端（另开终端）
 cd frontend
 npm install
 npm run dev
 ```
 
-前端开发服务器跑在 `http://localhost:5173`，自动代理 API 到 8000 端口。
-
-### 构建前端
+### Linux 服务器部署
 
 ```bash
-cd frontend
-npm run build
+# 1. 拉取项目
+git clone https://github.com/thenights1/AIcheck_platform.git /opt/compliance-audit
+cd /opt/compliance-audit
+
+# 2. 构建前端（如果服务器上没有 node，可本地构建好再上传）
+cd frontend && npm install && npm run build && cd ..
+
+# 3. 创建虚拟环境并安装依赖
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 4. 修改配置
+vim config.yaml   # 修改 secret_key、端口等
+
+# 5. 直接启动
+./start.sh
 ```
 
-构建产物输出到 `backend/static/`，后端会直接提供静态文件服务。
+#### systemd 守护 + nginx 反向代理
+
+```bash
+# systemd
+sudo cp deploy/compliance-audit.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now compliance-audit
+
+# nginx
+sudo cp deploy/nginx.conf /etc/nginx/sites-available/compliance-audit
+sudo ln -s /etc/nginx/sites-available/compliance-audit /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+后端跑在 `127.0.0.1:8000`，nginx 代理到 80/443 端口，WebSocket 路径 `/api/agent/ws` 已单独配置。
 
 ### 部署 Agent
 
-1. 浏览器打开 `http://<服务器地址>:8000`，进入 **Agent** 页面
-2. 点击 **下载 Agent 包 (ZIP)**
-3. 解压到目标机器，编辑 `agent.yaml` 中的 `server_url` 为服务器地址
-4. 双击 `run_agent.bat` 启动 Agent
+1. 浏览器打开 `http://<服务器域名或IP>`，登录后进入 **Agent** 页面
+2. 点击 **下载 Agent 包 (ZIP)**（包含 token，每个账号独立）
+3. 解压到目标机器，编辑 `agent.yaml` 中的 `server_url`：
+   ```yaml
+   server_url: "http://<服务器域名或IP>"
+   ```
+4. 启动 Agent：
+   - Windows：双击 `run_agent.bat`
+   - Linux / macOS：`chmod +x run_agent.sh && ./run_agent.sh`
 
-**前提**：目标机器需要安装 [opencode CLI](https://github.com/anomalyco/opencode)。
+**前提**：目标机器需要安装 Python 3.10+ 和 [opencode CLI](https://github.com/anomalyco/opencode)。
 
 ## 新增合规技能
 
