@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from pathlib import Path
 
@@ -20,6 +21,8 @@ AGENT_FILES = [
     "runner.py",
     "reporter.py",
 ]
+
+_OWNER_TOKEN_RE = re.compile(r'^(\s*owner_token:\s*).*$', re.MULTILINE)
 
 
 def _parse_auth(authorization: str | None) -> dict | None:
@@ -74,15 +77,12 @@ def download_agent_package(authorization: str | None = Header(None)):
         # Inject agent_token into agent.yaml
         if agent_yaml.is_file():
             yaml_content = agent_yaml.read_text(encoding="utf-8")
-            # Set owner_token if user has one
-            if agent_token:
-                yaml_content = yaml_content.replace(
-                    "owner_token: \"\"",
-                    f"owner_token: \"{agent_token}\""
+            if _OWNER_TOKEN_RE.search(yaml_content):
+                yaml_content = _OWNER_TOKEN_RE.sub(
+                    f'\\g<1>"{agent_token}"', yaml_content
                 )
-                # Also handle the case where owner_token line might not exist
-                if "owner_token:" not in yaml_content:
-                    yaml_content = yaml_content.rstrip() + f"\nowner_token: \"{agent_token}\"\n"
+            else:
+                yaml_content = yaml_content.rstrip() + f'\nowner_token: "{agent_token}"\n'
             zf.writestr("agent.yaml", yaml_content)
 
     buf.seek(0)
