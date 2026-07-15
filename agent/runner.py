@@ -124,13 +124,11 @@ async def _run_single_skill(
         skill_dir = workspace / ".opencode" / "skills" / skill_name
         skill_dir.mkdir(parents=True, exist_ok=True)
 
-        # Copy SKILL.md to workspace
+        # Copy entire skill directory (SKILL.md + scripts + references)
         if skill_md_path:
-            src = Path(skill_md_path)
-            if src.is_file():
-                (skill_dir / "SKILL.md").write_text(
-                    src.read_text(encoding="utf-8"), encoding="utf-8"
-                )
+            src_dir = Path(skill_md_path).parent
+            if src_dir.is_dir():
+                _copytree(src_dir, skill_dir)
 
         # Write opencode config
         config_dir = workspace / ".opencode"
@@ -266,3 +264,17 @@ def _parse_skill_output(output: str, returncode: int) -> dict:
         "output": output,
         "result_detail": result_detail,
     }
+
+
+def _copytree(src: Path, dst: Path) -> None:
+    """Copy entire directory tree, used to replicate skill files into workspace."""
+    import shutil
+    if not src.is_dir():
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    for item in src.iterdir():
+        target = dst / item.name
+        if item.is_file():
+            shutil.copy2(item, target)
+        elif item.is_dir():
+            _copytree(item, target)
