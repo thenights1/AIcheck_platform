@@ -160,7 +160,6 @@ async def _run_single_skill_streaming(
     exe_path = shutil.which(executable)
     if exe_path is None:
         print(f"  [WARN] opencode CLI not found (looked for: {executable})")
-        _rmtree(opendir)
         return _simulate_skill_result(skill_name, skill_label, target_folder)
 
     print(f"  opencode found at: {exe_path}")
@@ -183,7 +182,6 @@ async def _run_single_skill_streaming(
             pass
     except FileNotFoundError:
         print(f"  [ERROR] opencode not found at runtime: {exe_path}")
-        _rmtree(opendir)
         return {
             "status": "error",
             "output": f"opencode CLI not found at {exe_path}.",
@@ -191,7 +189,6 @@ async def _run_single_skill_streaming(
         }
     except Exception as exc:
         print(f"  [ERROR] opencode start failed: {exc}")
-        _rmtree(opendir)
         return {
             "status": "error",
             "output": f"Failed to start opencode: {exc}",
@@ -274,7 +271,6 @@ async def _run_single_skill_streaming(
                 on_line(f"[进程退出，返回码: {proc.returncode}]") if on_line else None
 
         if cancel_event and cancel_event.is_set():
-            _rmtree(opendir)
             return {
                 "status": "error",
                 "output": "[Task cancelled by user]",
@@ -282,7 +278,6 @@ async def _run_single_skill_streaming(
             }
 
         if proc.returncode != 0:
-            _rmtree(opendir)
             return {
                 "status": "error",
                 "output": f"opencode exited with code {proc.returncode}",
@@ -291,7 +286,6 @@ async def _run_single_skill_streaming(
 
         # Return collected output
         collected_output = "\n".join(stdout_lines)
-        _rmtree(opendir)
         return {
             "status": "pass",
             "output": collected_output or "[No output from opencode]",
@@ -342,15 +336,6 @@ def _decode_bytes(data: bytes) -> str:
     except UnicodeDecodeError:
         pass
     return data.decode("utf-8", errors="replace")
-
-
-def _rmtree(path: Path) -> None:
-    """Remove a directory tree. Uses shutil but swallows errors."""
-    try:
-        if path.exists():
-            shutil.rmtree(path, ignore_errors=True)
-    except Exception:
-        pass
 
 
 def _copytree(src: Path, dst: Path) -> None:
