@@ -148,7 +148,9 @@ async def _run_single_skill_streaming(
 
     config_json = {
         "model": config.opencode.model or "",
-        "skills": [str(skill_dir)],
+        "skills": {
+            skill_name: str(skill_dir),
+        },
     }
     (opendir / "opencode.json").write_text(
         json.dumps(config_json, indent=2), encoding="utf-8"
@@ -164,13 +166,8 @@ async def _run_single_skill_streaming(
         return _simulate_skill_result(skill_name, skill_label, target_folder)
 
     print(f"  opencode found at: {exe_path}")
-
-    # Write the full prompt to a file to avoid Windows CMD argument mangling
-    prompt_file = opendir / "prompt.txt"
-    prompt_file.write_text(prompt, encoding="utf-8")
-    short_prompt = f"请读取 {prompt_file} 中的完整指令并执行审查任务。"
-    cmd = [exe_path, "run", "--dir", str(target_folder), short_prompt]
-    print(f"  Command: {exe_path} run --dir {target_folder} <short prompt>")
+    cmd = [exe_path, "run", "--dir", str(target_folder), prompt]
+    print(f"  Command: {exe_path} run --dir {target_folder} <prompt>")
 
     try:
         proc = await asyncio.create_subprocess_exec(
