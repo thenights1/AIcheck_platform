@@ -166,8 +166,11 @@ async def _run_single_skill_streaming(
         return _simulate_skill_result(skill_name, skill_label, target_folder)
 
     print(f"  opencode found at: {exe_path}")
-    cmd = [exe_path, "run", "--dir", str(target_folder), prompt]
-    print(f"  Command: {exe_path} run --dir {target_folder} <prompt>")
+    real = _resolve_real_executable(exe_path)
+    if real != exe_path:
+        print(f"  resolved to: {real}")
+    cmd = [real, "run", "--dir", str(target_folder), prompt]
+    print(f"  Command: {real} run --dir {target_folder} <prompt>")
 
     try:
         proc = await asyncio.create_subprocess_exec(
