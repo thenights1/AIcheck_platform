@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import tempfile
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -134,71 +134,69 @@ async def _run_single_skill_streaming(
         f"审查完成后，输出一个JSON总结，格式为: {{\"overall\": \"pass|fail\", \"checks\": [{{\"item\": \"...\", \"result\": \"pass|fail\", \"reason\": \"...\"}}]}}"
     )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        workspace = Path(tmpdir)
-        skill_dir = workspace / ".opencode" / "skills" / skill_name
-        skill_dir.mkdir(parents=True, exist_ok=True)
+    # Create .opencode/ directly in target folder so opencode finds the skill
+    opendir = target_folder / ".opencode"
+    opendir.mkdir(parents=True, exist_ok=True)
+    skill_dir = opendir / "skills" / skill_name
+    skill_dir.mkdir(parents=True, exist_ok=True)
 
-        if skill_md_path:
-            src_dir = Path(skill_md_path).parent
-            if src_dir.is_dir():
-                _copytree(src_dir, skill_dir)
+    if skill_md_path:
+        src_dir = Path(skill_md_path).parent
+        if src_dir.is_dir():
+            _copytree(src_dir, skill_dir)
 
-        config_dir = workspace / ".opencode"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        config_json = {
-            "model": config.opencode.model or "",
-            "skills": [str(skill_dir)],
-        }
-        (config_dir / "opencode.json").write_text(
-            json.dumps(config_json, indent=2), encoding="utf-8"
+    config_json = {
+        "model": config.opencode.model or "",
+        "skills": [str(skill_dir)],
+    }
+    (opendir / "opencode.json").write_text(
+        json.dumps(config_json, indent=2), encoding="utf-8"
+    )
+
+    print(f"  Prompt: {prompt[:200]}...")
+    print(f"  Target: {target_folder}")
+
+    import shutil
+    exe_path = shutil.which(executable)
+    if exe_path is None:
+        print(f"  [WARN] opencode CLI not found (looked for: {executable})")
+        _rmtree(opendir)
+        return _simulate_skill_result(skill_name, skill_label, target_folder)
+
+    print(f"  opencode found at: {exe_path}")
+    cmd = [exe_path, "run", "--dir", str(target_folder)]
+    print(f"  Command: {' '.join(cmd)}")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(target_folder),
         )
-
-        print(f"  Prompt: {prompt[:200]}...")
-        print(f"  Workspace: {workspace}")
-        print(f"  Target: {target_folder}")
-
-        import shutil
-        exe_path = shutil.which(executable)
-        if exe_path is None:
-            print(f"  [WARN] opencode CLI not found (looked for: {executable})")
-            return _simulate_skill_result(skill_name, skill_label, target_folder)
-
-        print(f"  opencode found at: {exe_path}")
-        # Use workspace (with .opencode/) as --dir so opencode finds the skill.
-        # Target folder path is in the prompt, opencode can read from anywhere.
-        cmd = [exe_path, "run", "--dir", str(workspace)]
-        print(f"  Command: {' '.join(cmd)}")
-
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(workspace),
-            )
-            # Send prompt through stdin
-            try:
-                proc.stdin.write(prompt.encode("utf-8"))
-                await proc.stdin.drain()
-                proc.stdin.close()
-            except Exception:
-                pass
-        except FileNotFoundError:
-            print(f"  [ERROR] opencode not found at runtime: {exe_path}")
-            return {
-                "status": "error",
-                "output": f"opencode CLI not found at {exe_path}.",
-                "result_detail": {"error": "executable_not_found"},
-            }
-        except Exception as exc:
-            print(f"  [ERROR] opencode start failed: {exc}")
-            return {
-                "status": "error",
-                "output": f"Failed to start opencode: {exc}",
-                "result_detail": {"error": "start_error", "detail": str(exc)},
-            }
+            proc.stdin.write(prompt.encode("utf-8"))
+            await proc.stdin.drain()
+            proc.stdin.close()
+        except Exception:
+            pass
+    except FileNotFoundError:
+        print(f"  [ERROR] opencode not found at runtime: {exe_path}")
+        _rmtree(opendir)
+        return {
+            "status": "error",
+            "output": f"opencode CLI not found at {exe_path}.",
+            "result_detail": {"error": "executable_not_found"},
+        }
+    except Exception as exc:
+        print(f"  [ERROR] opencode start failed: {exc}")
+        _rmtree(opendir)
+        return {
+            "status": "error",
+            "output": f"Failed to start opencode: {exc}",
+            "result_detail": {"error": "start_error", "detail": str(exc)},
+        }
 
         # Stream stdout and stderr line by line
         stdout_lines: list[str] = []
@@ -276,6 +274,7 @@ async def _run_single_skill_streaming(
                 on_line(f"[进程退出，返回码: {proc.returncode}]") if on_line else None
 
         if cancel_event and cancel_event.is_set():
+            _rmtree(opendir)
             return {
                 "status": "error",
                 "output": "[Task cancelled by user]",
@@ -283,6 +282,7 @@ async def _run_single_skill_streaming(
             }
 
         if proc.returncode != 0:
+            _rmtree(opendir)
             return {
                 "status": "error",
                 "output": f"opencode exited with code {proc.returncode}",
@@ -291,6 +291,7 @@ async def _run_single_skill_streaming(
 
         # Return collected output
         collected_output = "\n".join(stdout_lines)
+        _rmtree(opendir)
         return {
             "status": "pass",
             "output": collected_output or "[No output from opencode]",
@@ -341,6 +342,15 @@ def _decode_bytes(data: bytes) -> str:
     except UnicodeDecodeError:
         pass
     return data.decode("utf-8", errors="replace")
+
+
+def _rmtree(path: Path) -> None:
+    """Remove a directory tree. Uses shutil but swallows errors."""
+    try:
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+    except Exception:
+        pass
 
 
 def _copytree(src: Path, dst: Path) -> None:
