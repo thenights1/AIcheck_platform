@@ -176,11 +176,16 @@ async def _run_single_skill_streaming(
             cwd=str(target_folder),
         )
         try:
-            proc.stdin.write(prompt.encode("utf-8"))
+            proc.stdin.write((prompt + "\n").encode("utf-8"))
             await proc.stdin.drain()
-            proc.stdin.close()
+            proc.stdin.write_eof()
+            if on_line:
+                on_line("[stdin sent, waiting for opencode response...]")
         except Exception:
-            pass
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
     except FileNotFoundError:
         print(f"  [ERROR] opencode not found at runtime: {exe_path}")
         return {
