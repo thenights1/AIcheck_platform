@@ -163,11 +163,14 @@ async def _run_single_skill_streaming(
         print(f"  [WARN] opencode CLI not found (looked for: {executable})")
         return _simulate_skill_result(skill_name, skill_label, target_folder)
 
-    # Resolve .CMD wrapper to actual .exe to avoid argument mangling on Windows
-    exe_path = _resolve_real_executable(exe_path)
     print(f"  opencode found at: {exe_path}")
-    cmd = [exe_path, "run", "--dir", str(target_folder), prompt]
-    print(f"  Command: {exe_path} run --dir {target_folder} <prompt>")
+
+    # Write the full prompt to a file to avoid Windows CMD argument mangling
+    prompt_file = opendir / "prompt.txt"
+    prompt_file.write_text(prompt, encoding="utf-8")
+    short_prompt = f"请读取 {prompt_file} 中的完整指令并执行审查任务。"
+    cmd = [exe_path, "run", "--dir", str(target_folder), short_prompt]
+    print(f"  Command: {exe_path} run --dir {target_folder} <short prompt>")
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -388,11 +391,10 @@ def _resolve_real_executable(path: str) -> str:
         content = p.read_text(encoding="utf-8", errors="replace")
     except Exception:
         return path
-    # npm .CMD pattern: "...\node_modules\xxx\bin\xxx.exe" %*
     import re
-    m = re.search(r'"([^"]*\.exe)"', content)
+    m = re.search(r'node_modules.+?\.exe', content)
     if m:
-        resolved = Path(p.parent) / m.group(1)
+        resolved = p.parent / m.group(0)
         if resolved.is_file():
             return str(resolved)
     return path
