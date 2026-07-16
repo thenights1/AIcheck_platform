@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -284,12 +285,36 @@ async def _run_single_skill_streaming(
                 "result_detail": {"error": "non_zero_exit", "returncode": proc.returncode},
             }
 
-        # Return collected output
+        # Parse collected output to extract structured result
         collected_output = "\n".join(stdout_lines)
+        parsed = _parse_ai_output(collected_output)
+        overall = parsed.get("overall", "pass" if proc.returncode == 0 else "fail")
+        checks = parsed.get("checks", [])
+
+        # Build a clean summary markdown
+        summary_lines = [f"## 审查结果: {'通过' if overall == 'pass' else '不通过'}", ""]
+        if checks:
+            summary_lines.append("| 检查项 | 结果 | 说明 |")
+            summary_lines.append("|--------|------|------|")
+            for c in checks:
+                item = c.get("item", "?")
+                result = c.get("result", "?")
+                reason = c.get("reason", "")
+                icon = {"pass": "通过", "fail": "不通过", "na": "不适用"}.get(result, result)
+                summary_lines.append(f"| {item} | {icon} | {reason} |")
+            summary_lines.append("")
+
+        summary = "\n".join(summary_lines)
+
         return {
-            "status": "pass",
-            "output": collected_output or "[No output from opencode]",
-            "result_detail": {"returncode": proc.returncode or 0},
+            "status": "pass" if overall == "pass" else "fail",
+            "output": summary,
+            "result_detail": {
+                "overall": overall,
+                "checks": checks,
+                "raw_output": collected_output,
+                "returncode": proc.returncode or 0,
+            },
         }
 
 
@@ -336,6 +361,27 @@ def _decode_bytes(data: bytes) -> str:
     except UnicodeDecodeError:
         pass
     return data.decode("utf-8", errors="replace")
+
+
+def _parse_ai_output(text: str) -> dict:
+    """Extract the JSON block from AI output and return structured result."""
+    import re
+    # Find the last JSON object in the text (AI usually puts it at the end)
+    matches = list(re.finditer(r'\{[^{}]*"overall"\s*:\s*"[^"]*"[^{}]*\}', text))
+    if not matches:
+        # Try to find any JSON block
+        matches = list(re.finditer(r'\{[^{}]*\}', text))
+    for m in reversed(matches):
+        try:
+            data = json.loads(m.group())
+            if isinstance(data, dict) and "overall" in data:
+                return {
+                    "overall": data.get("overall", "pass"),
+                    "checks": data.get("checks", []),
+                }
+        except json.JSONDecodeError:
+            continue
+    return {}
 
 
 def _copytree(src: Path, dst: Path) -> None:

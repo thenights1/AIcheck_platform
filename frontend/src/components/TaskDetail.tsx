@@ -28,6 +28,7 @@ export default function TaskDetail({ taskId, onBack }: Props) {
   const [task, setTask] = useState<TaskDetailType | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [rawExpanded, setRawExpanded] = useState<Set<string>>(new Set());
 
   const refresh = async () => {
     try {
@@ -51,6 +52,13 @@ export default function TaskDetail({ taskId, onBack }: Props) {
     if (next.has(name)) next.delete(name);
     else next.add(name);
     setExpanded(next);
+  };
+
+  const toggleRaw = (name: string) => {
+    const next = new Set(rawExpanded);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    setRawExpanded(next);
   };
 
   if (loading) {
@@ -173,8 +181,25 @@ export default function TaskDetail({ taskId, onBack }: Props) {
                       </div>
                     )}
                     {result.output ? (
-                      <div className="prose prose-invert prose-sm max-w-none bg-slate-950 rounded-lg p-4 max-h-96 overflow-auto">
-                        <ReactMarkdown>{result.output}</ReactMarkdown>
+                      <div>
+                        <div className="prose prose-invert prose-sm max-w-none bg-slate-950 rounded-lg p-4 max-h-96 overflow-auto">
+                          <ReactMarkdown>{result.output}</ReactMarkdown>
+                        </div>
+                        {result.result_detail?.raw_output ? (
+                          <div className="mt-2">
+                            <button
+                              onClick={() => toggleRaw(result.skill_name)}
+                              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                            >
+                              {rawExpanded.has(result.skill_name) ? "▲ 收起原始报告" : "▼ 原始报告"}
+                            </button>
+                            {rawExpanded.has(result.skill_name) && (
+                              <div className="mt-2 prose prose-invert prose-sm max-w-none bg-slate-950 rounded-lg p-4 max-h-96 overflow-auto border border-slate-700">
+                                <ReactMarkdown>{String(result.result_detail.raw_output)}</ReactMarkdown>
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
                       </div>
                     ) : (
                       <p className="text-xs text-slate-500">等待输出...</p>
