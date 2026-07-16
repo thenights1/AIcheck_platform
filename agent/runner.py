@@ -165,16 +165,25 @@ async def _run_single_skill_streaming(
             return _simulate_skill_result(skill_name, skill_label, target_folder)
 
         print(f"  opencode found at: {exe_path}")
-        cmd = [exe_path, "run", "--dir", str(target_folder), prompt]
-        print(f"  Command: {' '.join(cmd[:4])}...")
+        # Pipe prompt via stdin to avoid Windows CMD mangling special chars
+        cmd = [exe_path, "run", "--dir", str(target_folder)]
+        print(f"  Command: {' '.join(cmd)}")
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(workspace),
             )
+            # Send prompt through stdin
+            try:
+                proc.stdin.write(prompt.encode("utf-8"))
+                await proc.stdin.drain()
+                proc.stdin.close()
+            except Exception:
+                pass
         except FileNotFoundError:
             print(f"  [ERROR] opencode not found at runtime: {exe_path}")
             return {
