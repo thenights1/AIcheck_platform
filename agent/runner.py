@@ -189,126 +189,126 @@ async def _run_single_skill_streaming(
             "result_detail": {"error": "start_error", "detail": str(exc)},
         }
 
-        # Stream stdout and stderr line by line
-        stdout_lines: list[str] = []
+    # Stream stdout and stderr line by line
+    stdout_lines: list[str] = []
 
-        async def _read_stream(stream, prefix: str, collector: list[str] | None = None) -> None:
-            while True:
-                if proc.returncode is not None:
-                    break
-                try:
-                    line = await stream.readline()
-                except Exception:
-                    break
-                if not line:
-                    break
-                text = _decode_bytes(line).rstrip("\n").rstrip("\r")
-                if text:
-                    if on_line:
-                        on_line(f"{prefix}{text}")
-                    if collector is not None:
-                        collector.append(text)
-
-        async def _timeout_killer():
+    async def _read_stream(stream, prefix: str, collector: list[str] | None = None) -> None:
+        while True:
+            if proc.returncode is not None:
+                break
             try:
-                await asyncio.wait_for(proc.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+                line = await stream.readline()
+            except Exception:
+                break
+            if not line:
+                break
+            text = _decode_bytes(line).rstrip("\n").rstrip("\r")
+            if text:
+                if on_line:
+                    on_line(f"{prefix}{text}")
+                if collector is not None:
+                    collector.append(text)
 
-        if cancel_event:
-
-            async def _cancel_watcher():
-                await cancel_event.wait()
-                if proc.returncode is None:
-                    proc.kill()
-                    await proc.wait()
-
-            cancel_task = asyncio.create_task(_cancel_watcher())
-
-        # Read stdout/stderr concurrently
-        stdout_task = asyncio.create_task(_read_stream(proc.stdout, "", collector=stdout_lines))
-        stderr_task = asyncio.create_task(_read_stream(proc.stderr, "[STDERR] "))
-        timeout_task = asyncio.create_task(_timeout_killer())
-
-        # Wait for all to finish
-        done, pending = await asyncio.wait(
-            [stdout_task, stderr_task, timeout_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        # Ensure proc is done
+    async def _timeout_killer():
         try:
-            await asyncio.wait_for(proc.wait(), timeout=5)
+            await asyncio.wait_for(proc.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
 
-        # Cancel remaining tasks
-        for t in pending:
-            t.cancel()
-        if cancel_event and "cancel_task" in locals():
-            cancel_task.cancel()
+    if cancel_event:
 
-        # Gather any remaining output
-        for t in [stdout_task, stderr_task]:
-            if not t.done():
-                try:
-                    await t
-                except (asyncio.CancelledError, Exception):
-                    pass
+        async def _cancel_watcher():
+            await cancel_event.wait()
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
 
-        if proc.returncode != 0 and proc.returncode is not None:
-            if cancel_event and cancel_event.is_set():
-                on_line("[进程已终止]") if on_line else None
-            else:
-                on_line(f"[进程退出，返回码: {proc.returncode}]") if on_line else None
+        cancel_task = asyncio.create_task(_cancel_watcher())
 
+    # Read stdout/stderr concurrently
+    stdout_task = asyncio.create_task(_read_stream(proc.stdout, "", collector=stdout_lines))
+    stderr_task = asyncio.create_task(_read_stream(proc.stderr, "[STDERR] "))
+    timeout_task = asyncio.create_task(_timeout_killer())
+
+    # Wait for all to finish
+    done, pending = await asyncio.wait(
+        [stdout_task, stderr_task, timeout_task],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+
+    # Ensure proc is done
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+
+    # Cancel remaining tasks
+    for t in pending:
+        t.cancel()
+    if cancel_event and "cancel_task" in locals():
+        cancel_task.cancel()
+
+    # Gather any remaining output
+    for t in [stdout_task, stderr_task]:
+        if not t.done():
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    if proc.returncode != 0 and proc.returncode is not None:
         if cancel_event and cancel_event.is_set():
-            return {
-                "status": "error",
-                "output": "[Task cancelled by user]",
-                "result_detail": {"error": "cancelled"},
-            }
+            on_line("[进程已终止]") if on_line else None
+        else:
+            on_line(f"[进程退出，返回码: {proc.returncode}]") if on_line else None
 
-        if proc.returncode != 0:
-            return {
-                "status": "error",
-                "output": f"opencode exited with code {proc.returncode}",
-                "result_detail": {"error": "non_zero_exit", "returncode": proc.returncode},
-            }
-
-        # Parse collected output to extract structured result
-        collected_output = "\n".join(stdout_lines)
-        parsed = _parse_ai_output(collected_output)
-        overall = parsed.get("overall", "pass" if proc.returncode == 0 else "fail")
-        checks = parsed.get("checks", [])
-
-        # Build a clean summary markdown
-        summary_lines = [f"## 审查结果: {'通过' if overall == 'pass' else '不通过'}", ""]
-        if checks:
-            summary_lines.append("| 检查项 | 结果 | 说明 |")
-            summary_lines.append("|--------|------|------|")
-            for c in checks:
-                item = c.get("item", "?")
-                result = c.get("result", "?")
-                reason = c.get("reason", "")
-                icon = {"pass": "通过", "fail": "不通过", "na": "不适用"}.get(result, result)
-                summary_lines.append(f"| {item} | {icon} | {reason} |")
-            summary_lines.append("")
-
-        summary = "\n".join(summary_lines)
-
+    if cancel_event and cancel_event.is_set():
         return {
-            "status": "pass" if overall == "pass" else "fail",
-            "output": summary,
-            "result_detail": {
-                "overall": overall,
-                "checks": checks,
-                "raw_output": collected_output,
-                "returncode": proc.returncode or 0,
-            },
+            "status": "error",
+            "output": "[Task cancelled by user]",
+            "result_detail": {"error": "cancelled"},
         }
+
+    if proc.returncode != 0:
+        return {
+            "status": "error",
+            "output": f"opencode exited with code {proc.returncode}",
+            "result_detail": {"error": "non_zero_exit", "returncode": proc.returncode},
+        }
+
+    # Parse collected output to extract structured result
+    collected_output = "\n".join(stdout_lines)
+    parsed = _parse_ai_output(collected_output)
+    overall = parsed.get("overall", "pass" if proc.returncode == 0 else "fail")
+    checks = parsed.get("checks", [])
+
+    # Build a clean summary markdown
+    summary_lines = [f"## 审查结果: {'通过' if overall == 'pass' else '不通过'}", ""]
+    if checks:
+        summary_lines.append("| 检查项 | 结果 | 说明 |")
+        summary_lines.append("|--------|------|------|")
+        for c in checks:
+            item = c.get("item", "?")
+            result = c.get("result", "?")
+            reason = c.get("reason", "")
+            icon = {"pass": "通过", "fail": "不通过", "na": "不适用"}.get(result, result)
+            summary_lines.append(f"| {item} | {icon} | {reason} |")
+        summary_lines.append("")
+
+    summary = "\n".join(summary_lines)
+
+    return {
+        "status": "pass" if overall == "pass" else "fail",
+        "output": summary,
+        "result_detail": {
+            "overall": overall,
+            "checks": checks,
+            "raw_output": collected_output,
+            "returncode": proc.returncode or 0,
+        },
+    }
 
 
 def _simulate_skill_result(skill_name: str, skill_label: str, target_folder: Path) -> dict:
