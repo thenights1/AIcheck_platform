@@ -163,6 +163,8 @@ async def _run_single_skill_streaming(
         print(f"  [WARN] opencode CLI not found (looked for: {executable})")
         return _simulate_skill_result(skill_name, skill_label, target_folder)
 
+    # Resolve .CMD wrapper to actual .exe to avoid argument mangling on Windows
+    exe_path = _resolve_real_executable(exe_path)
     print(f"  opencode found at: {exe_path}")
     cmd = [exe_path, "run", "--dir", str(target_folder), prompt]
     print(f"  Command: {exe_path} run --dir {target_folder} <prompt>")
@@ -375,6 +377,25 @@ def _parse_ai_output(text: str) -> dict:
         except json.JSONDecodeError:
             continue
     return {}
+
+
+def _resolve_real_executable(path: str) -> str:
+    """If the executable is a Windows .CMD wrapper, resolve to the actual .exe inside."""
+    p = Path(path)
+    if p.suffix.lower() != ".cmd":
+        return path
+    try:
+        content = p.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return path
+    # npm .CMD pattern: "...\node_modules\xxx\bin\xxx.exe" %*
+    import re
+    m = re.search(r'"([^"]*\.exe)"', content)
+    if m:
+        resolved = Path(p.parent) / m.group(1)
+        if resolved.is_file():
+            return str(resolved)
+    return path
 
 
 def _copytree(src: Path, dst: Path) -> None:
