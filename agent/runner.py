@@ -165,8 +165,9 @@ async def _run_single_skill_streaming(
             return _simulate_skill_result(skill_name, skill_label, target_folder)
 
         print(f"  opencode found at: {exe_path}")
-        # Pipe prompt via stdin to avoid Windows CMD mangling special chars
-        cmd = [exe_path, "run", "--dir", str(target_folder)]
+        # Use workspace (with .opencode/) as --dir so opencode finds the skill.
+        # Target folder path is in the prompt, opencode can read from anywhere.
+        cmd = [exe_path, "run", "--dir", str(workspace)]
         print(f"  Command: {' '.join(cmd)}")
 
         try:
