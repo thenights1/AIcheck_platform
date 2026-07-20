@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { getTaskDetail } from "../api/client";
 import type { TaskDetail as TaskDetailType } from "../types";
 
@@ -183,7 +184,7 @@ export default function TaskDetail({ taskId, onBack }: Props) {
                     {result.output ? (
                       <div>
                         <div className="prose prose-invert prose-sm max-w-none bg-slate-950 rounded-lg p-4 max-h-96 overflow-auto">
-                          <ReactMarkdown>{result.output}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.output}</ReactMarkdown>
                         </div>
                         {result.result_detail?.raw_output ? (
                           <div className="mt-2">
@@ -195,7 +196,7 @@ export default function TaskDetail({ taskId, onBack }: Props) {
                             </button>
                             {rawExpanded.has(result.skill_name) && (
                               <div className="mt-2 prose prose-invert prose-sm max-w-none bg-slate-950 rounded-lg p-4 max-h-96 overflow-auto border border-slate-700">
-                                <ReactMarkdown>{String(result.result_detail.raw_output)}</ReactMarkdown>
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{String(result.result_detail.raw_output)}</ReactMarkdown>
                               </div>
                             )}
                           </div>
